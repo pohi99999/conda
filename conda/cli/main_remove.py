@@ -20,6 +20,7 @@ def configure_parser(sub_parsers: _SubParsersAction, **kwargs) -> ArgumentParser
     from .helpers import (
         add_output_and_prompt_options,
         add_parser_channels,
+        add_parser_frozen_env,
         add_parser_networking,
         add_parser_prefix,
         add_parser_prune,
@@ -71,6 +72,7 @@ def configure_parser(sub_parsers: _SubParsersAction, **kwargs) -> ArgumentParser
         epilog=epilog,
         **kwargs,
     )
+    add_parser_frozen_env(p)
     add_parser_pscheck(p)
 
     add_parser_prefix(p)
@@ -144,6 +146,7 @@ def execute(args: Namespace, parser: ArgumentParser) -> int:
     from ..core.link import PrefixSetup, UnlinkLinkTransaction
     from ..core.prefix_data import PrefixData
     from ..exceptions import (
+        CondaEnvException,
         CondaEnvironmentError,
         CondaValueError,
         PackagesNotFoundError,
@@ -160,12 +163,19 @@ def execute(args: Namespace, parser: ArgumentParser) -> int:
 
     prefix_data = PrefixData.from_context()
     prefix_data.assert_environment()
-    prefix = str(prefix_data.prefix_path)
+    if context.protect_frozen_envs:
+        prefix_data.assert_not_frozen()
     check_non_admin()
+    prefix = str(prefix_data.prefix_path)
 
     if args.all and prefix_data == PrefixData(context.default_prefix):
         msg = "Cannot remove current environment. Deactivate and run conda remove again"
         raise CondaEnvironmentError(msg)
+
+    if args.all and prefix_data == PrefixData(context.default_activation_prefix):
+        raise CondaEnvException(
+            "Cannot remove an environment if it is configured as `default_activation_env`."
+        )
 
     if args.all and path_is_clean(prefix):
         return 0

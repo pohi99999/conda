@@ -68,7 +68,7 @@ def get_packages(prefix):
         raise EnvironmentLocationNotFound(prefix)
 
     return sorted(
-        PrefixData(prefix, pip_interop_enabled=True).iter_records(),
+        PrefixData(prefix, interoperability=True).iter_records(),
         key=lambda x: x.name,
     )
 
@@ -85,7 +85,7 @@ def compare_packages(active_pkgs, specification_pkgs) -> tuple[int, list[str]]:
                 miss = True
                 output.append(
                     f"{name} found but mismatch. Specification pkg: {pkg}, "
-                    f"Running pkg: {active_pkg.name}=={active_pkg.version}={active_pkg.build}"
+                    f"Running pkg: {active_pkg.spec}"
                 )
         else:
             miss = True
@@ -102,7 +102,6 @@ def compare_packages(active_pkgs, specification_pkgs) -> tuple[int, list[str]]:
 def execute(args: Namespace, parser: ArgumentParser) -> int:
     from ..base.context import context
     from ..core.prefix_data import PrefixData
-    from ..env import specs
     from ..exceptions import SpecNotFound
     from ..gateways.connection.session import CONDA_SESSION_SCHEMES
     from .common import stdout_json
@@ -118,8 +117,12 @@ def execute(args: Namespace, parser: ArgumentParser) -> int:
         else:
             filename = abspath(expanduser(expandvars(args.file)))
 
-        spec = specs.detect(name=args.name, filename=filename, directory=os.getcwd())
-        env = spec.environment
+        spec_hook = context.plugin_manager.get_environment_specifier(
+            source=filename,
+            name=context.environment_specifier,
+        )
+        spec = spec_hook.environment_spec(filename)
+        env = spec.env
 
         if args.prefix is None and args.name is None:
             args.name = env.name
@@ -127,11 +130,9 @@ def execute(args: Namespace, parser: ArgumentParser) -> int:
         raise
 
     active_pkgs = {pkg.name: pkg for pkg in get_packages(prefix)}
-    specification_pkgs = []
-    if "conda" in env.dependencies:
-        specification_pkgs = specification_pkgs + env.dependencies["conda"]
-    if "pip" in env.dependencies:
-        specification_pkgs = specification_pkgs + env.dependencies["pip"]
+    specification_pkgs = env.requested_packages
+    for packages in env.external_packages.values():
+        specification_pkgs = specification_pkgs + packages
 
     exitcode, output = compare_packages(active_pkgs, specification_pkgs)
 
